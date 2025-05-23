@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Интеграция с Telegram</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Мой чат с Telegram</h1>
+        
+        <div class="message-form">
+            <input type="number" id="chatId" placeholder="ID чата в Telegram">
+            <textarea id="messageText" placeholder="Ваше сообщение"></textarea>
+            <button onclick="sendToTelegram()">Отправить</button>
+        </div>
+        
+        <div id="messagesList"></div>
+    </div>
+
+    
+    <script>
+        // Загружаем сообщения при загрузке страницы
+        async function loadMessages() {
+            const response = await fetch('/get-messages');
+            const messages = await response.json();
+            
+            const container = document.getElementById('messagesList');
+            container.innerHTML = messages.map(msg => `
+                <div class="message">
+                    <strong>Чат ${msg.chatId}:</strong>
+                    <p>${msg.text}</p>
+                    <small>${new Date(msg.timestamp).toLocaleString()}</small>
+                </div>
+            `).join('');
+        }
+
+        // Отправка сообщения в Telegram
+        async function sendToTelegram() {
+            const chatId = document.getElementById('chatId').value;
+            const text = document.getElementById('messageText').value;
+            
+            await fetch('/send-to-telegram', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chatId, text })
+            });
+            
+            alert('Сообщение отправлено!');
+            loadMessages(); // Обновляем список
+        }
+
+        // Обновляем сообщения каждые 5 секунд
+        setInterval(loadMessages, 5000);
+        loadMessages();
+    </script>
+</body>
+</html>
