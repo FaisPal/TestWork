@@ -1,57 +1,212 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Интеграция с Telegram</title>
+    <title>Telegram Chat Manager</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>Мой чат с Telegram</h1>
-        
-        <div class="message-form">
-            <input type="number" id="chatId" placeholder="ID чата в Telegram">
-            <textarea id="messageText" placeholder="Ваше сообщение"></textarea>
-            <button onclick="sendToTelegram()">Отправить</button>
+        <div class="header">
+            <h1>Telegram Chat Manager</h1>
+            <div class="bot-status" id="botStatus">Проверка статуса...</div>
         </div>
         
-        <div id="messagesList"></div>
+        <div class="tab-container">
+            <button class="tab-btn active" onclick="openTab('sendTab')">Отправка</button>
+            <button class="tab-btn" onclick="openTab('historyTab')">История</button>
+            <button class="tab-btn" onclick="openTab('logsTab')">Логи</button>
+        </div>
+
+        <div id="sendTab" class="tab-content" style="display: block;">
+            <div class="auth-box">
+                <h3>Шаг 1: Получите код</h3>
+                <ol>
+                    <li>Напишите боту <a id="botLink" target="_blank">/start</a></li>
+                    <li>Получите 6-значный код</li>
+                </ol>
+            </div>
+
+            <div class="message-form">
+                <h3>Шаг 2: Отправка сообщения</h3>
+                <input type="text" id="authCode" placeholder="Введите 6-значный код">
+                <textarea id="messageText" placeholder="Текст сообщения" rows="4"></textarea>
+                <button onclick="sendMessage()">Отправить сообщение</button>
+                <div id="statusMessage" class="status-message"></div>
+            </div>
+        </div>
+
+        <div id="historyTab" class="tab-content">
+            <div class="section">
+                <h3>История сообщений</h3>
+                <button onclick="loadMessages()">Обновить</button>
+                <div id="messagesList" class="messages-container"></div>
+            </div>
+        </div>
+
+        <div id="logsTab" class="tab-content">
+            <div class="section">
+                <h3>Логи сервера</h3>
+                <div class="log-controls">
+                    <button onclick="loadLogs()">Обновить логи</button>
+                    <button onclick="clearLogs()" class="danger-btn">Очистить логи</button>
+                </div>
+                <div id="serverLogs" class="logs-container"></div>
+            </div>
+        </div>
     </div>
 
-    
     <script>
-        // Загружаем сообщения при загрузке страницы
-        async function loadMessages() {
-            const response = await fetch('/get-messages');
-            const messages = await response.json();
-            
-            const container = document.getElementById('messagesList');
-            container.innerHTML = messages.map(msg => `
-                <div class="message">
-                    <strong>Чат ${msg.chatId}:</strong>
-                    <p>${msg.text}</p>
-                    <small>${new Date(msg.timestamp).toLocaleString()}</small>
-                </div>
-            `).join('');
+        // Получаем информацию о боте
+        async function getBotInfo() {
+            try {
+                const response = await fetch('/get-bot-info');
+                const data = await response.json();
+                document.getElementById('botLink').href = `https://t.me/${data.username}`;
+                document.getElementById('botLink').textContent = `@${data.username}`;
+                document.getElementById('botStatus').textContent = `Бот @${data.username} работает`;
+                document.getElementById('botStatus').className = 'bot-status active';
+            } catch (error) {
+                document.getElementById('botStatus').textContent = 'Ошибка подключения к боту';
+                document.getElementById('botStatus').className = 'bot-status error';
+            }
         }
 
-        // Отправка сообщения в Telegram
-        async function sendToTelegram() {
-            const chatId = document.getElementById('chatId').value;
-            const text = document.getElementById('messageText').value;
-            
-            await fetch('/send-to-telegram', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chatId, text })
+        // Управление вкладками
+        function openTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.style.display = 'none';
+            });
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
             });
             
-            alert('Сообщение отправлено!');
-            loadMessages(); // Обновляем список
+            document.getElementById(tabName).style.display = 'block';
+            event.currentTarget.classList.add('active');
+            
+            if (tabName === 'logsTab') loadLogs();
+            if (tabName === 'historyTab') loadMessages();
         }
 
-        // Обновляем сообщения каждые 5 секунд
-        setInterval(loadMessages, 5000);
-        loadMessages();
+        // Отправка сообщения
+        async function sendMessage() {
+            const code = document.getElementById('authCode').value.trim();
+            const text = document.getElementById('messageText').value.trim();
+            const statusEl = document.getElementById('statusMessage');
+            
+            if (!code || !text) {
+                showStatus('Заполните все поля!', 'error');
+                return;
+            }
+            
+            showStatus('Отправка...', 'loading');
+            
+            try {
+                const response = await fetch('/send-message', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, text })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus('Сообщение отправлено!', 'success');
+                    document.getElementById('messageText').value = '';
+                    loadMessages();
+                } else {
+                    throw new Error(result.error || 'Неизвестная ошибка');
+                }
+            } catch (error) {
+                showStatus(`Ошибка: ${error.message}`, 'error');
+                console.error('Ошибка отправки:', error);
+            }
+        }
+
+        // Загрузка сообщений
+        async function loadMessages() {
+            const container = document.getElementById('messagesList');
+            container.innerHTML = '<p>Загрузка...</p>';
+            
+            try {
+                const response = await fetch('/get-messages');
+                const messages = await response.json();
+                
+                if (messages.length === 0) {
+                    container.innerHTML = '<p>Нет сообщений в истории</p>';
+                    return;
+                }
+                
+                container.innerHTML = messages.map(msg => `
+                    <div class="message">
+                        <div class="message-header">
+                            <span class="chat-id">Чат: ${msg.chatId}</span>
+                            <span class="timestamp">${new Date(msg.timestamp).toLocaleString()}</span>
+                        </div>
+                        <div class="message-text">${msg.text}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                container.innerHTML = '<p>Ошибка загрузки истории</p>';
+                console.error('Ошибка:', error);
+            }
+        }
+
+        // Загрузка логов
+        async function loadLogs() {
+            const container = document.getElementById('serverLogs');
+            container.innerHTML = '<p>Загрузка логов...</p>';
+            
+            try {
+                const response = await fetch('/get-logs');
+                const data = await response.json();
+                
+                if (data.logs.length === 0) {
+                    container.innerHTML = '<p>Логи отсутствуют</p>';
+                    return;
+                }
+                
+                container.innerHTML = data.logs.map(log => `
+                    <div class="log-entry">${log}</div>
+                `).join('');
+                
+                container.scrollTop = container.scrollHeight;
+            } catch (error) {
+                container.innerHTML = '<p>Ошибка загрузки логов</p>';
+                console.error('Ошибка:', error);
+            }
+        }
+
+        // Очистка логов
+        async function clearLogs() {
+            if (!confirm('Вы уверены, что хотите очистить логи сервера?')) return;
+            
+            try {
+                await fetch('/clear-logs', { method: 'POST' });
+                loadLogs();
+            } catch (error) {
+                console.error('Ошибка:', error);
+            }
+        }
+
+        // Показать статус
+        function showStatus(message, type) {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = message;
+            statusEl.className = `status-message ${type}`;
+            
+            if (type !== 'loading') {
+                setTimeout(() => {
+                    statusEl.textContent = '';
+                    statusEl.className = 'status-message';
+                }, 3000);
+            }
+        }
+
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', () => {
+            getBotInfo();
+            loadMessages();
+        });
     </script>
 </body>
 </html>
